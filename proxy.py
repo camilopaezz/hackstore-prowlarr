@@ -64,7 +64,41 @@ def rewrite_html(html_text):
     ATTR_RE = re.compile(r"""(\b(?:src|href|action)=["'])([^"']*)""", re.IGNORECASE)
     html_text = ATTR_RE.sub(rewrite_url, html_text)
 
+    html_text = tag_quality_tables(html_text)
+
     return html_text
+
+
+QUALITY_TABLE_RE = re.compile(
+    r'(<div\s+class="[^"]*\baccordion__heading\b[^"]*"[^>]*>(.*?)</div>\s*'
+    r'<div\s+class="[^"]*\bpanel\b[^"]*"[^>]*>.*?)'
+    r'(<table\s+[^>]*class="[^"]*\bnewtab\b[^"]*"[^>]*>)',
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def tag_quality_tables(html_text):
+    def replacer(m):
+        heading_html = m.group(1)
+        heading_text = m.group(2)
+        table_tag = m.group(3)
+
+        quality = "other"
+        if re.search(r"\b4K\b|2160p", heading_text, re.IGNORECASE):
+            quality = "4K"
+        elif re.search(r"\b1080p\b", heading_text):
+            quality = "1080p"
+        elif re.search(r"\b720p\b", heading_text):
+            quality = "720p"
+        elif re.search(r"DVDRip", heading_text, re.IGNORECASE):
+            quality = "DVDRip"
+
+        new_table = table_tag.replace(
+            "<table", f'<table data-quality="{quality}"', 1
+        )
+        return heading_html + new_table
+
+    return QUALITY_TABLE_RE.sub(replacer, html_text)
 
 
 @app.route("/", defaults={"path": ""}, methods=["GET", "POST", "HEAD", "OPTIONS"])

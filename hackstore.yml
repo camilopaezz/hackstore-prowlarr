@@ -65,8 +65,10 @@ search:
     leechers:
       text: 1
     size:
-      text: "1 GB"
-    date:
+      optional: true
+    description:
+      text: "Audio Latino"
+      optional: true
       text: now
     downloadvolumefactor:
       text: 0
@@ -75,5 +77,7 @@ search:
 
 download:
   selectors:
+    - selector: "table.newtab[data-quality='1080p'] a.btn-slide"
+      attribute: href
     - selector: "table.newtab a.btn-slide"
       attribute: href
