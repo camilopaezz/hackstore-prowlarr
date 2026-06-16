@@ -10,6 +10,7 @@ followredirect: true
 testlinktorrent: false
 links:
   - http://localhost:8080/
+  - http://192.168.1.91:8080/
 
 caps:
   categories:
@@ -50,7 +51,7 @@ search:
         - name: re_replace
           args: ["\\s+\\(\\d{4}\\)$", ""]
     category:
-      text: "{{ if eq .Query.Type \"tv-search\" }}5000{{ else if eq .Query.Type \"movie-search\" }}2000{{ else }}2000{{ end }}"
+      text: '{{ if eq .Query.Type "tv-search" }}5000{{ else if eq .Query.Type "movie-search" }}2000{{ else }}2000{{ end }}'
     details:
       selector: "h3 a.movie-title"
       attribute: href

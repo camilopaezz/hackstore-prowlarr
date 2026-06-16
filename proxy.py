@@ -2,9 +2,10 @@
 """Reverse proxy for hackstore.fo — decrypts acortalink URLs and rewrites HTML."""
 
 import re
-from urllib.parse import urljoin, urlparse, parse_qs, urlencode
-from flask import Flask, request, Response
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse
+
 import requests
+from flask import Flask, Response, request
 
 from decrypt_url import decrypt_acortalink
 
@@ -18,6 +19,7 @@ ACORTALINK_RE = re.compile(
     re.IGNORECASE,
 )
 
+
 def rewrite_html(html_text):
     def replace_acortalink(m):
         encoded = m.group(2)
@@ -25,7 +27,7 @@ def rewrite_html(html_text):
             real_url = decrypt_acortalink(encoded)
         except Exception:
             return m.group(0)
-        return f'{m.group(1)}{real_url}{m.group(3)}'
+        return f"{m.group(1)}{real_url}{m.group(3)}"
 
     html_text = ACORTALINK_RE.sub(replace_acortalink, html_text)
 
@@ -39,18 +41,22 @@ def rewrite_html(html_text):
             return m.group(0)
 
         parsed = urlparse(url)
-        if parsed.netloc in ("www.hackstore.fo", "hackstore.fo", "") and not parsed.scheme in ("", "http", "https"):
+        if parsed.netloc in (
+            "www.hackstore.fo",
+            "hackstore.fo",
+            "",
+        ) and not parsed.scheme in ("", "http", "https"):
             pass
 
         if parsed.netloc in ("www.hackstore.fo", "hackstore.fo"):
             new_url = PROXY_HOST + (parsed.path or "/")
             if parsed.query:
                 new_url += "?" + parsed.query
-            return f'{attr}{new_url}'
+            return f"{attr}{new_url}"
 
         if url.startswith("/"):
             new_url = PROXY_HOST + url
-            return f'{attr}{new_url}'
+            return f"{attr}{new_url}"
 
         return m.group(0)
 
@@ -67,10 +73,16 @@ def proxy(path):
     if request.query_string:
         target_url += "?" + request.query_string.decode("utf-8")
 
-    headers = {k: v for k, v in request.headers if k.lower() not in ("host", "connection", "accept-encoding")}
+    headers = {
+        k: v
+        for k, v in request.headers
+        if k.lower() not in ("host", "connection", "accept-encoding")
+    }
     headers["Host"] = "www.hackstore.fo"
     headers["Accept-Encoding"] = "gzip, deflate"
-    headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    headers["User-Agent"] = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    )
 
     upstream_resp = requests.request(
         method=request.method,
@@ -92,15 +104,26 @@ def proxy(path):
                     location += "?" + parsed.query
             elif location.startswith("/"):
                 location = PROXY_HOST + location
-        excluded = ["content-encoding", "content-length", "transfer-encoding", "connection"]
-        resp_headers = [(k, v) for k, v in upstream_resp.headers.items()
-                        if k.lower() not in excluded]
-        return Response(status=upstream_resp.status_code, headers={"Location": location})
+        excluded = [
+            "content-encoding",
+            "content-length",
+            "transfer-encoding",
+            "connection",
+        ]
+        resp_headers = [
+            (k, v)
+            for k, v in upstream_resp.headers.items()
+            if k.lower() not in excluded
+        ]
+        return Response(
+            status=upstream_resp.status_code, headers={"Location": location}
+        )
 
     content_type = upstream_resp.headers.get("Content-Type", "").lower()
     excluded = ["content-encoding", "content-length", "transfer-encoding", "connection"]
-    resp_headers = [(k, v) for k, v in upstream_resp.headers.items()
-                    if k.lower() not in excluded]
+    resp_headers = [
+        (k, v) for k, v in upstream_resp.headers.items() if k.lower() not in excluded
+    ]
 
     if upstream_resp.status_code >= 400:
         return Response(
@@ -112,7 +135,9 @@ def proxy(path):
     if "text/html" in content_type:
         html_text = upstream_resp.text
         html_text = rewrite_html(html_text)
-        return Response(html_text, status=upstream_resp.status_code, headers=resp_headers)
+        return Response(
+            html_text, status=upstream_resp.status_code, headers=resp_headers
+        )
 
     return Response(
         upstream_resp.content,
@@ -123,4 +148,4 @@ def proxy(path):
 
 if __name__ == "__main__":
     print(f"Proxy running at {PROXY_HOST} -> {UPSTREAM}")
-    app.run(host="127.0.0.1", port=8080, debug=False)
+    app.run(host="0.0.0.0", port=8080, debug=False)
