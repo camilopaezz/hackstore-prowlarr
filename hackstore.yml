@@ -47,9 +47,6 @@ search:
     title:
       selector: "h3 a.movie-title"
       attribute: title
-      filters:
-        - name: re_replace
-          args: ["\\s+\\(\\d{4}\\)$", ""]
     category:
       text: '{{ if eq .Query.Type "tv-search" }}5000{{ else if eq .Query.Type "movie-search" }}2000{{ else }}2000{{ end }}'
     details:
