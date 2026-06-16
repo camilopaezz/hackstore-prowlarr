@@ -1,0 +1,30 @@
+# Python bytecode & runtime
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env/
+.venv*/
+virtualenv/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment / secrets
+.env
+*.env.local
+
+# Project-specific
+*.url
