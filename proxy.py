@@ -61,15 +61,12 @@ def parse_heading(heading_text):
 
 
 def extract_tiers(html_text):
-    headings = re.findall(
-        r'<div\s+class="[^"]*\baccordion__heading[^"]*"[^>]*>(.*?)</div>',
-        html_text, re.DOTALL | re.IGNORECASE,
-    )
+    soup = BeautifulSoup(html_text, "html.parser")
+    headings = soup.select(".accordion__heading.accordion")
     tiers = []
     seen = set()
-    for h in headings:
-        text = re.sub(r"<[^>]*>", " ", h).strip()
-        text = re.sub(r"\s+", " ", text)
+    for heading in headings:
+        text = heading.get_text(" ", strip=True)
         if not text:
             continue
         tier = parse_heading(text)
@@ -77,6 +74,9 @@ def extract_tiers(html_text):
         if key in seen:
             continue
         seen.add(key)
+        panel = heading.find_next_sibling("div", class_="panel")
+        size_td = panel.select_one("td.fuente-td") if panel else None
+        tier["size"] = size_td.get_text(strip=True) if size_td else ""
         tiers.append(tier)
     return tiers
 
@@ -183,6 +183,7 @@ def enrich_listing_page(html_text):
             if clone_a:
                 enriched = build_enriched_title(raw_title, tier)
                 clone_a["title"] = enriched
+                clone_a["data-size"] = tier.get("size", "")
                 parsed = urlparse(detail_url)
                 clone_a["href"] = parsed.path + f"?_tier={j}" + (("&" + parsed.query) if parsed.query else "")
             clones.append(clone)

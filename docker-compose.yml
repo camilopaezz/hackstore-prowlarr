@@ -1,0 +1,29 @@
+services:
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-America/Bogota}
+    volumes:
+      - ./data/prowlarr:/config
+      - ./hackstore.yml:/config/Definitions/Custom/hackstore.yml:ro
+    ports:
+      - "9696:9696"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-America/Bogota}
+    volumes:
+      - ./data/radarr:/config
+    ports:
+      - "7878:7878"
+    restart: unless-stopped

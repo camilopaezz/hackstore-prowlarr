@@ -10,6 +10,7 @@ followredirect: true
 testlinktorrent: false
 links:
   - http://192.168.1.91:8080/
+  - http://192.168.1.71:8080/
 
 caps:
   categories:
@@ -65,6 +66,8 @@ search:
     leechers:
       text: 1
     size:
+      selector: "h3 a.movie-title"
+      attribute: data-size
       optional: true
     description:
       text: "Audio Latino"
