@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """Reverse proxy for hackstore.fo — decrypts acortalink URLs and rewrites HTML."""
 
+import copy
 import os
 import re
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
 import requests
+from bs4 import BeautifulSoup
 from flask import Flask, Response, request
 
 from decrypt_url import decrypt_acortalink
@@ -14,11 +19,202 @@ app = Flask(__name__)
 
 UPSTREAM = "https://www.hackstore.fo"
 PROXY_HOST = os.environ.get("PROXY_HOST", "http://192.168.1.91:8080")
+CACHE_TTL = int(os.environ.get("DETAIL_CACHE_TTL", "3600"))
+MAX_TIERS = int(os.environ.get("MAX_TIERS", "4"))
+
+_detail_cache = {}
+_cache_lock = threading.Lock()
 
 ACORTALINK_RE = re.compile(
     r'(<a\b[^>]*\shref=")https://acortalink\.net/s\.php\?i=([^"&]*)(")',
     re.IGNORECASE,
 )
+
+HEADING_SOURCE_RE = re.compile(r"\b(WEB-DL|BDRip|BluRay|BRRip|DVDRip|HDRip|WEBRip)\b", re.I)
+HEADING_QUALITY_RE = re.compile(r"\b(4K|2160p|1080p|720p)\b", re.I)
+HEADING_AUDIO_RE = re.compile(r"(Latino|Espa.ol).*?((?:E?-?AC3|AAC|DTS)\s*\d+\.\d+)", re.I)
+MOVIE_TITLE_YEAR_RE = re.compile(r"^(.*?)\s*\((\d{4})\)$")
+
+
+def parse_heading(heading_text):
+    source = ""
+    sm = HEADING_SOURCE_RE.search(heading_text)
+    if sm:
+        source = sm.group(1)
+
+    quality = ""
+    qm = HEADING_QUALITY_RE.search(heading_text)
+    if qm:
+        q = qm.group(1)
+        if q.upper() == "2160P":
+            q = "4K"
+        elif q.upper() == "4K":
+            q = "4K"
+        quality = q
+
+    audio = "Latino"
+    am = HEADING_AUDIO_RE.search(heading_text)
+    if am:
+        audio = f"{am.group(1)} {am.group(2)}"
+
+    return {"source": source, "quality": quality, "audio": audio}
+
+
+def extract_tiers(html_text):
+    headings = re.findall(
+        r'<div\s+class="[^"]*\baccordion__heading[^"]*"[^>]*>(.*?)</div>',
+        html_text, re.DOTALL | re.IGNORECASE,
+    )
+    tiers = []
+    seen = set()
+    for h in headings:
+        text = re.sub(r"<[^>]*>", " ", h).strip()
+        text = re.sub(r"\s+", " ", text)
+        if not text:
+            continue
+        tier = parse_heading(text)
+        key = (tier["source"], tier["quality"], tier["audio"])
+        if key in seen:
+            continue
+        seen.add(key)
+        tiers.append(tier)
+    return tiers
+
+
+def build_enriched_title(raw_title, tier):
+    m = MOVIE_TITLE_YEAR_RE.match(raw_title.strip())
+    if not m:
+        return raw_title
+    name = m.group(1).replace(":", "").replace("  ", " ").strip()
+    year = m.group(2)
+    parts = [name, year]
+    src = tier.get("source", "")
+    q = tier.get("quality", "")
+    if src:
+        parts.append(src)
+    if q:
+        parts.append(q)
+    parts.append("Latino")
+    return ".".join(parts)
+
+
+def _prefetch_details(urls):
+    def _fetch_one(url):
+        with _cache_lock:
+            cached = _detail_cache.get(url)
+            if cached and time.time() < cached["expires"]:
+                return
+        try:
+            resp = requests.get(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Accept-Encoding": "gzip, deflate",
+                },
+                timeout=20,
+            )
+            if "text/html" in resp.headers.get("Content-Type", "").lower():
+                tiers = extract_tiers(resp.text)
+            else:
+                tiers = []
+        except Exception:
+            tiers = []
+        with _cache_lock:
+            _detail_cache[url] = {
+                "expires": time.time() + CACHE_TTL,
+                "tiers": tiers,
+            }
+
+    urls = list(set(urls))
+    if not urls:
+        return
+    with ThreadPoolExecutor(max_workers=min(len(urls), 10)) as executor:
+        futures = {executor.submit(_fetch_one, u): u for u in urls}
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception:
+                pass
+
+
+def enrich_listing_page(html_text):
+    soup = BeautifulSoup(html_text, "html.parser")
+    thumbs = soup.select("#movies-block-main .movie-thumbnail")
+    if not thumbs:
+        return html_text
+
+    detail_urls = []
+    for thumb in thumbs:
+        a_tag = thumb.select_one("h3 a.movie-title")
+        if a_tag and a_tag.get("href"):
+            detail_urls.append(a_tag["href"])
+        else:
+            detail_urls.append(None)
+
+    _prefetch_details([u for u in detail_urls if u])
+
+    for i, thumb in enumerate(thumbs):
+        detail_url = detail_urls[i]
+        if not detail_url:
+            continue
+        a_tag = thumb.select_one("h3 a.movie-title")
+        if not a_tag:
+            continue
+        raw_title = a_tag.get("title", "") or a_tag.get_text(strip=True)
+        if not raw_title:
+            continue
+
+        with _cache_lock:
+            cached = _detail_cache.get(detail_url, {})
+        tiers = cached.get("tiers", []) if time.time() < cached.get("expires", 0) else []
+        tiers = tiers[:MAX_TIERS]
+
+        if not tiers:
+            parts = raw_title.replace(":", "").replace("(", ".").replace(")", "").split(".")
+            parts = [p.strip() for p in parts if p.strip()]
+            enriched = ".".join(parts + ["Latino"])
+            a_tag["title"] = enriched
+            continue
+
+        clones = []
+        for j, tier in enumerate(tiers):
+            clone = copy.copy(thumb)
+            clone_a = clone.select_one("h3 a.movie-title")
+            if clone_a:
+                enriched = build_enriched_title(raw_title, tier)
+                clone_a["title"] = enriched
+                parsed = urlparse(detail_url)
+                clone_a["href"] = parsed.path + f"?_tier={j}" + (("&" + parsed.query) if parsed.query else "")
+            clones.append(clone)
+
+        parent = thumb.parent
+        if parent:
+            idx = list(parent.children).index(thumb)
+            thumb.decompose()
+            for j, clone in enumerate(clones):
+                parent.insert(idx + j, clone)
+
+    return str(soup)
+
+
+def filter_detail_page(html_text, tier_index):
+    soup = BeautifulSoup(html_text, "html.parser")
+    headings = soup.select(".accordion__heading.accordion")
+    for i, heading in enumerate(headings):
+        if i != tier_index:
+            panel = heading.find_next_sibling("div", class_="panel")
+            if panel:
+                panel.decompose()
+            heading.decompose()
+    return str(soup)
+
+
+def _is_listing_page(path, query_string):
+    if path.rstrip("/") in ("peliculas", "series", "animes"):
+        return True
+    if "s=" in query_string:
+        return True
+    return False
 
 
 def rewrite_html(html_text):
@@ -83,18 +279,23 @@ def tag_quality_tables(html_text):
         heading_text = m.group(2)
         table_tag = m.group(3)
 
-        quality = "other"
-        if re.search(r"\b4K\b|2160p", heading_text, re.IGNORECASE):
-            quality = "4K"
-        elif re.search(r"\b1080p\b", heading_text):
-            quality = "1080p"
-        elif re.search(r"\b720p\b", heading_text):
-            quality = "720p"
-        elif re.search(r"DVDRip", heading_text, re.IGNORECASE):
-            quality = "DVDRip"
+        heading_visible = re.sub(r"<[^>]*>", " ", heading_text)
+        heading_visible = re.sub(r"\s+", " ", heading_visible).strip()
+        tier = parse_heading(heading_visible)
+
+        quality = tier["quality"] or "other"
+        source = tier["source"] or ""
+        audio = tier["audio"] or "Latino"
 
         new_table = table_tag.replace(
             "<table", f'<table data-quality="{quality}"', 1
+        )
+        if source:
+            new_table = new_table.replace(
+                "<table", f'<table data-source="{source}"', 1
+            )
+        new_table = new_table.replace(
+            "<table", f'<table data-audio="{audio}"', 1
         )
         return heading_html + new_table
 
@@ -104,9 +305,16 @@ def tag_quality_tables(html_text):
 @app.route("/", defaults={"path": ""}, methods=["GET", "POST", "HEAD", "OPTIONS"])
 @app.route("/<path:path>", methods=["GET", "POST", "HEAD", "OPTIONS"])
 def proxy(path):
+    qs = request.query_string.decode("utf-8")
+    parsed_qs = parse_qs(qs, keep_blank_values=True)
+    tier_index = None
+    if "_tier" in parsed_qs:
+        tier_index = int(parsed_qs.pop("_tier")[0])
+    flat_qs = urlencode(parsed_qs, doseq=True) if parsed_qs else ""
+
     target_url = UPSTREAM.rstrip("/") + "/" + path
-    if request.query_string:
-        target_url += "?" + request.query_string.decode("utf-8")
+    if flat_qs:
+        target_url += "?" + flat_qs
 
     headers = {
         k: v
@@ -169,6 +377,10 @@ def proxy(path):
 
     if "text/html" in content_type:
         html_text = upstream_resp.text
+        if tier_index is not None:
+            html_text = filter_detail_page(html_text, tier_index)
+        elif _is_listing_page(path, qs):
+            html_text = enrich_listing_page(html_text)
         html_text = rewrite_html(html_text)
         return Response(
             html_text, status=upstream_resp.status_code, headers=resp_headers

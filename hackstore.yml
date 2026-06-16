@@ -58,7 +58,7 @@ search:
       attribute: title
       filters:
         - name: re_replace
-          args: [".*\\((\\d{4})\\)$", "$1"]
+          args: [".*\\.(\\d{4})\\.(?:WEB-DL|BDRip|BluRay|DVDRip|\\d{3,4}p|4K|Latino).*", "$1"]
       optional: true
     seeders:
       text: 1
@@ -69,7 +69,6 @@ search:
     description:
       text: "Audio Latino"
       optional: true
-      text: now
     downloadvolumefactor:
       text: 0
     uploadvolumefactor:
@@ -77,7 +76,5 @@ search:
 
 download:
   selectors:
-    - selector: "table.newtab[data-quality='1080p'] a.btn-slide"
-      attribute: href
     - selector: "table.newtab a.btn-slide"
       attribute: href

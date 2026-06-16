@@ -7,17 +7,38 @@ Prowlarr → Cardigann → hackstore.yml → proxy.py (localhost:8080) → hacks
                                           ↓
                               decrypts acortalink URLs in HTML
                               rewrites href/src/action to proxy
+                              enriches listing pages (pre-fetches detail
+                                pages → clones results per quality tier)
+                              filters detail pages to single quality tier
 ```
 
 - `proxy.py` — Flask reverse proxy, must be running for the indexer to work
 - `hackstore.yml` — Cardigann v11 indexer definition, installed into Prowlarr's `Definitions/Custom/`
 - `decrypt_url.py` — standalone; called by the proxy to decrypt `acortalink.net/s.php?i=...` URLs into real magnet/torrent links
 
+## Quality tier enrichment
+
+The proxy clones each listing page result N times (once per quality tier found on the detail page), so Prowlarr sees separate results like:
+- `Movie.2026.WEB-DL.4K.Latino`
+- `Movie.2026.WEB-DL.1080p.Latino`
+- `Movie.2026.1080p.Latino`
+- `Movie.2026.720p.Latino`
+
+Each clone's `href` includes `?_tier=N`. When Cardigann visits the detail page, the proxy strips `_tier` from the upstream request and filters the response HTML to show only that quality's accordion section.
+
+## Env vars
+
+| Var | Default | Description |
+|---|---|---|
+| `PROXY_HOST` | `http://192.168.1.91:8080` | Base URL used when rewriting links |
+| `DETAIL_CACHE_TTL` | `3600` | Seconds to cache detail page tier metadata |
+| `MAX_TIERS` | `4` | Max quality tiers to expose per result |
+
 ## Commands
 
 ```bash
 # Install deps (uses uv)
-uv venv && source .venv/bin/activate && uv pip install cryptography flask requests
+uv venv && source .venv/bin/activate && uv pip install cryptography flask requests beautifulsoup4
 
 # Start proxy (required before using the indexer in Prowlarr)
 ./.venv/bin/python proxy.py
