@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Reverse proxy for hackstore.fo — decrypts acortalink URLs and rewrites HTML."""
 
+import os
 import re
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
@@ -12,7 +13,7 @@ from decrypt_url import decrypt_acortalink
 app = Flask(__name__)
 
 UPSTREAM = "https://www.hackstore.fo"
-PROXY_HOST = "http://localhost:8080"
+PROXY_HOST = os.environ.get("PROXY_HOST", "http://192.168.1.91:8080")
 
 ACORTALINK_RE = re.compile(
     r'(<a\b[^>]*\shref=")https://acortalink\.net/s\.php\?i=([^"&]*)(")',
