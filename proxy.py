@@ -541,9 +541,11 @@ def proxy(path):
 
 
 if __name__ == "__main__":
+    from waitress import serve
+
     if TMDB_API_KEY:
         print(f"[tmdb] translation enabled (key=...{TMDB_API_KEY[-4:]}, langs={TMDB_LANGUAGES})", flush=True)
     else:
         print("[tmdb] translation DISABLED — set TMDB_API_KEY env var", flush=True)
     print(f"Proxy running at {PROXY_HOST} -> {UPSTREAM}", flush=True)
-    app.run(host="0.0.0.0", port=8080, debug=False)
+    serve(app, host="0.0.0.0", port=8080)
