@@ -425,8 +425,10 @@ def proxy(path):
     if "s" in parsed_qs:
         original = parsed_qs["s"][0]
         post_type = parsed_qs.get("post_type", ["movies"])[0]
-        translated = translate_query(original, post_type)
-        if translated != original:
+        clean = original.replace("+", " ")
+        clean = re.sub(r'\s+\(?\d{4}\)?\s*$', '', clean)
+        translated = translate_query(clean, post_type)
+        if translated != clean:
             print(f"[tmdb] {original!r} → {translated!r}", flush=True)
             parsed_qs["s"] = [translated]
 
