@@ -78,6 +78,8 @@ def translate_query(query, post_type):
     Falls back to the original query on any error or if no match is found.
     """
     if not TMDB_API_KEY or not query:
+        if not TMDB_API_KEY:
+            print(f"[tmdb] skipped (no API key) for {query!r}", flush=True)
         return query
 
     languages = [lang.strip() for lang in TMDB_LANGUAGES.split(",") if lang.strip()]
@@ -127,6 +129,7 @@ def translate_query(query, post_type):
 
                     if not results:
                         # Nothing found — bubble-empty cache for all languages
+                        print(f"[tmdb] no TMDB match for {query!r} ({post_type})", flush=True)
                         for l in languages:
                             with _cache_lock:
                                 _tmdb_cache[f"{query}|{post_type}|{l}"] = {
@@ -158,8 +161,10 @@ def translate_query(query, post_type):
                 }
 
             if title and title.lower() != query.lower():
+                print(f"[tmdb] resolved via lang={lang}: {query!r} → {title!r}", flush=True)
                 return title
-        except Exception:
+        except Exception as e:
+            print(f"[tmdb] error for {query!r} (lang={lang}): {e}", flush=True)
             continue
 
     return query
@@ -422,6 +427,7 @@ def proxy(path):
         post_type = parsed_qs.get("post_type", ["movies"])[0]
         translated = translate_query(original, post_type)
         if translated != original:
+            print(f"[tmdb] {original!r} → {translated!r}", flush=True)
             parsed_qs["s"] = [translated]
 
     flat_qs = urlencode(parsed_qs, doseq=True) if parsed_qs else ""
@@ -508,5 +514,9 @@ def proxy(path):
 
 
 if __name__ == "__main__":
-    print(f"Proxy running at {PROXY_HOST} -> {UPSTREAM}")
+    if TMDB_API_KEY:
+        print(f"[tmdb] translation enabled (key=...{TMDB_API_KEY[-4:]}, langs={TMDB_LANGUAGES})", flush=True)
+    else:
+        print("[tmdb] translation DISABLED — set TMDB_API_KEY env var", flush=True)
+    print(f"Proxy running at {PROXY_HOST} -> {UPSTREAM}", flush=True)
     app.run(host="0.0.0.0", port=8080, debug=False)
