@@ -21,9 +21,13 @@ UPSTREAM = "https://www.hackstore.fo"
 PROXY_HOST = os.environ.get("PROXY_HOST", "http://192.168.1.91:8080")
 CACHE_TTL = int(os.environ.get("DETAIL_CACHE_TTL", "3600"))
 MAX_TIERS = int(os.environ.get("MAX_TIERS", "4"))
+TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
+TMDB_LANGUAGES = os.environ.get("TMDB_LANGUAGES", "es-MX,es")
+TMDB_TITLE_CACHE_TTL = int(os.environ.get("TMDB_TITLE_CACHE_TTL", "86400"))
 
 _detail_cache = {}
 _cache_lock = threading.Lock()
+_tmdb_cache = {}
 
 ACORTALINK_RE = re.compile(
     r'(<a\b[^>]*\shref=")https://acortalink\.net/s\.php\?i=([^"&]*)(")',
@@ -58,6 +62,107 @@ def parse_heading(heading_text):
         audio = f"{am.group(1)} {am.group(2)}"
 
     return {"source": source, "quality": quality, "audio": audio}
+
+
+def translate_query(query, post_type):
+    """Translate an English query to Latin-American Spanish via TMDB API.
+
+    Two-step approach to avoid skewed search results when using non-English
+    languages for content with sparse translations (e.g. anime):
+      1. Search TMDB without language param → get the correct TMDB ID
+      2. Fetch /movie/{id} or /tv/{id} with language={es-MX} → get title
+
+    Cached at two levels:
+      - TMDB ID lookup: per (query, post_type) — shared across languages
+      - Translated title: per (query, post_type, lang)
+    Falls back to the original query on any error or if no match is found.
+    """
+    if not TMDB_API_KEY or not query:
+        return query
+
+    languages = [lang.strip() for lang in TMDB_LANGUAGES.split(",") if lang.strip()]
+    if not languages:
+        return query
+
+    if post_type in ("tvshows", "animes"):
+        search_endpoint = "/search/tv"
+        detail_endpoint = "/tv"
+        result_key = "name"
+    else:
+        search_endpoint = "/search/movie"
+        detail_endpoint = "/movie"
+        result_key = "title"
+
+    id_cache_key = f"__id__{query}|{post_type}"
+    tmdb_id = None
+    id_expired = True
+
+    for lang in languages:
+        title_cache_key = f"{query}|{post_type}|{lang}"
+        with _cache_lock:
+            cached = _tmdb_cache.get(title_cache_key)
+            if cached and time.time() < cached["expires"]:
+                title = cached["title"]
+                if title and title.lower() != query.lower():
+                    return title
+                continue
+
+        try:
+            # Step 1: resolve TMDB ID (once, shared across language chain)
+            if tmdb_id is None:
+                with _cache_lock:
+                    id_entry = _tmdb_cache.get(id_cache_key)
+                    if id_entry and time.time() < id_entry.get("expires", 0):
+                        tmdb_id = id_entry["tmdb_id"]
+                        id_expired = False
+
+                if tmdb_id is None or id_expired:
+                    resp = requests.get(
+                        f"https://api.themoviedb.org/3{search_endpoint}",
+                        params={"api_key": TMDB_API_KEY, "query": query},
+                        timeout=10,
+                    )
+                    resp.raise_for_status()
+                    results = resp.json().get("results", [])
+
+                    if not results:
+                        # Nothing found — bubble-empty cache for all languages
+                        for l in languages:
+                            with _cache_lock:
+                                _tmdb_cache[f"{query}|{post_type}|{l}"] = {
+                                    "expires": time.time() + TMDB_TITLE_CACHE_TTL,
+                                    "title": "",
+                                }
+                        return query
+
+                    tmdb_id = results[0]["id"]
+                    with _cache_lock:
+                        _tmdb_cache[id_cache_key] = {
+                            "expires": time.time() + TMDB_TITLE_CACHE_TTL,
+                            "tmdb_id": tmdb_id,
+                        }
+
+            # Step 2: fetch localized title
+            resp = requests.get(
+                f"https://api.themoviedb.org/3{detail_endpoint}/{tmdb_id}",
+                params={"api_key": TMDB_API_KEY, "language": lang},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            title = resp.json().get(result_key, "")
+
+            with _cache_lock:
+                _tmdb_cache[title_cache_key] = {
+                    "expires": time.time() + TMDB_TITLE_CACHE_TTL,
+                    "title": title,
+                }
+
+            if title and title.lower() != query.lower():
+                return title
+        except Exception:
+            continue
+
+    return query
 
 
 def extract_tiers(html_text):
@@ -311,6 +416,14 @@ def proxy(path):
     tier_index = None
     if "_tier" in parsed_qs:
         tier_index = int(parsed_qs.pop("_tier")[0])
+
+    if "s" in parsed_qs:
+        original = parsed_qs["s"][0]
+        post_type = parsed_qs.get("post_type", ["movies"])[0]
+        translated = translate_query(original, post_type)
+        if translated != original:
+            parsed_qs["s"] = [translated]
+
     flat_qs = urlencode(parsed_qs, doseq=True) if parsed_qs else ""
 
     target_url = UPSTREAM.rstrip("/") + "/" + path

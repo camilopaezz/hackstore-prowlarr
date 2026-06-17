@@ -33,6 +33,9 @@ Each clone's `href` includes `?_tier=N`. When Cardigann visits the detail page, 
 | `PROXY_HOST` | `http://192.168.1.91:8080` | Base URL used when rewriting links |
 | `DETAIL_CACHE_TTL` | `3600` | Seconds to cache detail page tier metadata |
 | `MAX_TIERS` | `4` | Max quality tiers to expose per result |
+| `TMDB_API_KEY` | `""` | TMDB API v3 key. If empty, query translation is skipped |
+| `TMDB_LANGUAGES` | `es-MX,es` | Comma-separated ordered list of locale codes to try |
+| `TMDB_TITLE_CACHE_TTL` | `86400` | Seconds to cache translated titles |
 
 ## Commands
 
