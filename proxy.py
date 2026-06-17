@@ -502,7 +502,10 @@ def proxy(path):
         if tier_index is not None:
             html_text = filter_detail_page(html_text, tier_index)
         elif _is_listing_page(path, qs):
+            before = len(BeautifulSoup(html_text, "html.parser").select("#movies-block-main .movie-thumbnail"))
             html_text = enrich_listing_page(html_text)
+            after = len(BeautifulSoup(html_text, "html.parser").select("#movies-block-main .movie-thumbnail"))
+            print(f"[proxy] results: {before} → {after} (after enrichment)", flush=True)
         html_text = rewrite_html(html_text)
         return Response(
             html_text, status=upstream_resp.status_code, headers=resp_headers
