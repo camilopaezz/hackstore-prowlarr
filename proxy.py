@@ -139,10 +139,12 @@ def translate_query(query, post_type):
                         return query
 
                     tmdb_id = results[0]["id"]
+                    english_title = results[0].get("title") or results[0].get("name", "")
                     with _cache_lock:
                         _tmdb_cache[id_cache_key] = {
                             "expires": time.time() + TMDB_TITLE_CACHE_TTL,
                             "tmdb_id": tmdb_id,
+                            "english_title": english_title,
                         }
 
             # Step 2: fetch localized title
@@ -168,6 +170,18 @@ def translate_query(query, post_type):
             continue
 
     return query
+
+
+def get_english_title(query, post_type):
+    """Return the cached original English title from a prior translate_query call."""
+    if not TMDB_API_KEY or not query:
+        return ""
+    cache_key = f"__id__{query}|{post_type}"
+    with _cache_lock:
+        cached = _tmdb_cache.get(cache_key)
+        if cached and time.time() < cached.get("expires", 0):
+            return cached.get("english_title", "")
+    return ""
 
 
 def extract_tiers(html_text):
@@ -247,7 +261,7 @@ def _prefetch_details(urls):
                 pass
 
 
-def enrich_listing_page(html_text):
+def enrich_listing_page(html_text, english_title=""):
     soup = BeautifulSoup(html_text, "html.parser")
     thumbs = soup.select("#movies-block-main .movie-thumbnail")
     if not thumbs:
@@ -280,18 +294,24 @@ def enrich_listing_page(html_text):
         tiers = tiers[:MAX_TIERS]
 
         if not tiers:
-            parts = raw_title.replace(":", "").replace("(", ".").replace(")", "").split(".")
+            base = english_title or raw_title
+            parts = base.replace(":", "").replace("(", ".").replace(")", "").split(".")
             parts = [p.strip() for p in parts if p.strip()]
             enriched = ".".join(parts + ["Latino"])
             a_tag["title"] = enriched
             continue
 
         clones = []
+        m = MOVIE_TITLE_YEAR_RE.match(raw_title.strip())
+        year = m.group(2) if m else ""
         for j, tier in enumerate(tiers):
             clone = copy.copy(thumb)
             clone_a = clone.select_one("h3 a.movie-title")
             if clone_a:
-                enriched = build_enriched_title(raw_title, tier)
+                if english_title and year:
+                    enriched = build_enriched_title(english_title + " (" + year + ")", tier)
+                else:
+                    enriched = build_enriched_title(raw_title, tier)
                 clone_a["title"] = enriched
                 clone_a["data-size"] = tier.get("size", "")
                 parsed = urlparse(detail_url)
@@ -422,6 +442,7 @@ def proxy(path):
     if "_tier" in parsed_qs:
         tier_index = int(parsed_qs.pop("_tier")[0])
 
+    english_title = ""
     if "s" in parsed_qs:
         original = parsed_qs["s"][0]
         post_type = parsed_qs.get("post_type", ["movies"])[0]
@@ -431,6 +452,7 @@ def proxy(path):
         if translated != clean:
             print(f"[tmdb] {original!r} → {translated!r}", flush=True)
             parsed_qs["s"] = [translated]
+        english_title = get_english_title(clean, post_type)
 
     flat_qs = urlencode(parsed_qs, doseq=True) if parsed_qs else ""
 
@@ -503,7 +525,7 @@ def proxy(path):
             html_text = filter_detail_page(html_text, tier_index)
         elif _is_listing_page(path, qs):
             before = len(BeautifulSoup(html_text, "html.parser").select("#movies-block-main .movie-thumbnail"))
-            html_text = enrich_listing_page(html_text)
+            html_text = enrich_listing_page(html_text, english_title=english_title)
             after = len(BeautifulSoup(html_text, "html.parser").select("#movies-block-main .movie-thumbnail"))
             print(f"[proxy] results: {before} → {after} (after enrichment)", flush=True)
         html_text = rewrite_html(html_text)
