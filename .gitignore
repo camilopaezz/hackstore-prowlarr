@@ -28,3 +28,4 @@ virtualenv/
 
 # Project-specific
 *.url
+data/
