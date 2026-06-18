@@ -5,7 +5,7 @@ WORKDIR /app
 COPY pyproject.toml .
 RUN pip install --no-cache-dir .
 
-COPY proxy.py decrypt_url.py .
+COPY proxy.py decrypt_url.py ./
 
 EXPOSE 8080
 
