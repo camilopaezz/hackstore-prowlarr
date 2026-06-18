@@ -16,5 +16,10 @@ dependencies = [
     "waitress>=3.0.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
 [tool.setuptools]
 py-modules = ["proxy", "decrypt_url"]
