@@ -582,5 +582,5 @@ if __name__ == "__main__":
         )
     else:
         print("[tmdb] translation DISABLED — set TMDB_API_KEY env var", flush=True)
-    print(f"Proxy running on port 8080 -> {UPSTREAM}", flush=True)
-    serve(app, host="0.0.0.0", port=8080)
+    print(f"Proxy running on port 7070 -> {UPSTREAM}", flush=True)
+    serve(app, host="0.0.0.0", port=7070)

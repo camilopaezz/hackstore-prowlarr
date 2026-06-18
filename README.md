@@ -17,12 +17,29 @@ docker build -t hackstore-proxy .
 
 # Run
 docker run -d \
-  -p 8080:8080 \
+  -p 7070:7070 \
   -e TMDB_API_KEY=your_tmdb_api_key \
   hackstore-proxy
 ```
 
-Then configure `hackstore.yml` links to point to `http://<your-host-ip>:8080/` and install it into Prowlarr's `Definitions/Custom/`.
+### Or with docker-compose
+
+```yaml
+# docker-compose.yml
+services:
+  hackstore-proxy:
+    build: .
+    ports:
+      - "7070:7070"
+    environment:
+      - TMDB_API_KEY=your_tmdb_api_key
+```
+
+```bash
+docker compose up -d
+```
+
+**Important:** whichever method you use, you must edit `hackstore.yml` `links` to point to the proxy URL Prowlarr can reach — e.g. `http://<your-host-ip>:7070/`. Then install the YML into Prowlarr's `Definitions/Custom/`.
 
 ## Environment variables
 
@@ -37,7 +54,7 @@ Then configure `hackstore.yml` links to point to `http://<your-host-ip>:8080/` a
 ## Architecture
 
 ```
-Prowlarr → Cardigann → hackstore.yml → proxy.py (localhost:8080) → hackstore.fo
+Prowlarr → Cardigann → hackstore.yml → proxy.py (localhost:7070) → hackstore.fo
                                           ↓
                               decrypts acortalink URLs in HTML
                               rewrites href/src/action to proxy
@@ -80,5 +97,5 @@ uv run ruff check . --fix    # auto-fix
 uv run ruff format .         # format code
 
 # Test
-curl -s --max-time 20 http://localhost:8080/ | head -c 300
+curl -s --max-time 20 http://localhost:7070/ | head -c 300
 ```

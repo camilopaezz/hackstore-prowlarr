@@ -3,7 +3,7 @@
 ## Architecture
 
 ```
-Prowlarr → Cardigann → hackstore.yml → proxy.py (localhost:8080) → hackstore.fo
+Prowlarr → Cardigann → hackstore.yml → proxy.py (localhost:7070) → hackstore.fo
                                           ↓
                               decrypts acortalink URLs in HTML
                               rewrites href/src/action to proxy
@@ -46,10 +46,10 @@ uv venv && source .venv/bin/activate && uv pip install cryptography flask reques
 ./.venv/bin/python proxy.py
 
 # Test proxy is working
-curl -s --max-time 20 http://localhost:8080/ | head -c 300
+curl -s --max-time 20 http://localhost:7070/ | head -c 300
 
 # Test acortalink decryption (any detail page through proxy)
-curl -s --max-time 30 http://localhost:8080/peliculas/stuart-little-2-la-aventura-continua-2002/ | rg -c 'magnet:'
+curl -s --max-time 30 http://localhost:7070/peliculas/stuart-little-2-la-aventura-continua-2002/ | rg -c 'magnet:'
 # Should return >0
 
 # Validate YML against Prowlarr v11 schema
@@ -81,11 +81,11 @@ The compose file includes `extra_hosts` mapping `host.docker.internal` to the ho
 
 ```bash
 # Option A: Keep LAN IP (default — containers can reach LAN IPs directly)
-# No changes needed. hackstore.yml links uses 192.168.1.91:8080
+# No changes needed. hackstore.yml links uses 192.168.1.91:7070
 
 # Option B: Use host.docker.internal (portable across networks)
 # Change hackstore.yml links to:
-#   - http://host.docker.internal:8080/
+#   - http://host.docker.internal:7070/
 # Then start proxy normally:
 python proxy.py
 ```

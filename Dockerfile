@@ -7,7 +7,7 @@ RUN pip install --no-cache-dir .
 
 COPY proxy.py decrypt_url.py ./
 
-EXPOSE 8080
+EXPOSE 7070
 
 ENV DETAIL_CACHE_TTL=3600 \
     MAX_TIERS=4 \
