@@ -76,6 +76,11 @@ uv pip install -e .
 # Start proxy
 python proxy.py
 
+# Lint & format
+uv run ruff check .          # check only
+uv run ruff check . --fix    # auto-fix
+uv run ruff format .         # format code
+
 # Test
 curl -s --max-time 20 http://localhost:8080/ | head -c 300
 ```

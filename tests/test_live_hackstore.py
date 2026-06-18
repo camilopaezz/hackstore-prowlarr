@@ -6,7 +6,6 @@ from bs4 import BeautifulSoup
 
 from proxy import PROXY_HOST, app
 
-
 RUN_LIVE = os.environ.get("RUN_LIVE_HACKSTORE") == "1"
 
 
@@ -21,7 +20,9 @@ def test_hackstore_proxy_listing_and_detail_e2e():
     thumb = listing_soup.select_one("#movies-block-main .movie-thumbnail")
     assert thumb is not None
 
-    link = listing_soup.select_one("#movies-block-main .movie-thumbnail h3 a.movie-title")
+    link = listing_soup.select_one(
+        "#movies-block-main .movie-thumbnail h3 a.movie-title"
+    )
     assert link is not None
     href = link.get("href", "")
     assert href.startswith(PROXY_HOST)

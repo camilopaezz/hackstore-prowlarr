@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Reverse proxy for hackstore.fo — decrypts acortalink URLs and rewrites HTML."""
 
+import contextlib
 import copy
 import os
 import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from urllib.parse import parse_qs, urlencode, urljoin, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -24,19 +25,24 @@ MAX_TIERS = int(os.environ.get("MAX_TIERS", "4"))
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
 TMDB_LANGUAGES = os.environ.get("TMDB_LANGUAGES", "es-MX,es")
 TMDB_TITLE_CACHE_TTL = int(os.environ.get("TMDB_TITLE_CACHE_TTL", "86400"))
+UPSTREAM_TIMEOUT = 20
 
 _detail_cache = {}
 _cache_lock = threading.Lock()
 _tmdb_cache = {}
 
 ACORTALINK_RE = re.compile(
-    r'(<a\b[^>]*\shref=")https://acortalink\.net/s\.php\?i=([^"&]*)(")',
+    r'(?P<prefix><a\b[^>]*\shref=)(?P<quote>["\'])https://acortalink\.net/s\.php\?i=(?P<encoded>[^"\']*)(?P=quote)',
     re.IGNORECASE,
 )
 
-HEADING_SOURCE_RE = re.compile(r"\b(WEB-DL|BDRip|BluRay|BRRip|DVDRip|HDRip|WEBRip)\b", re.I)
+HEADING_SOURCE_RE = re.compile(
+    r"\b(WEB-DL|BDRip|BluRay|BRRip|DVDRip|HDRip|WEBRip)\b", re.I
+)
 HEADING_QUALITY_RE = re.compile(r"\b(4K|2160p|1080p|720p)\b", re.I)
-HEADING_AUDIO_RE = re.compile(r"(Latino|Espa.ol).*?((?:E?-?AC3|AAC|DTS)\s*\d+\.\d+)", re.I)
+HEADING_AUDIO_RE = re.compile(
+    r"(Latino|Espa.ol).*?((?:E?-?AC3|AAC|DTS)\s*\d+\.\d+)", re.I
+)
 MOVIE_TITLE_YEAR_RE = re.compile(r"^(.*?)\s*\((\d{4})\)$")
 
 
@@ -50,9 +56,7 @@ def parse_heading(heading_text):
     qm = HEADING_QUALITY_RE.search(heading_text)
     if qm:
         q = qm.group(1)
-        if q.upper() == "2160P":
-            q = "4K"
-        elif q.upper() == "4K":
+        if q.upper() == "2160P" or q.upper() == "4K":
             q = "4K"
         quality = q
 
@@ -129,17 +133,22 @@ def translate_query(query, post_type):
 
                     if not results:
                         # Nothing found — bubble-empty cache for all languages
-                        print(f"[tmdb] no TMDB match for {query!r} ({post_type})", flush=True)
-                        for l in languages:
+                        print(
+                            f"[tmdb] no TMDB match for {query!r} ({post_type})",
+                            flush=True,
+                        )
+                        for lang in languages:
                             with _cache_lock:
-                                _tmdb_cache[f"{query}|{post_type}|{l}"] = {
+                                _tmdb_cache[f"{query}|{post_type}|{lang}"] = {
                                     "expires": time.time() + TMDB_TITLE_CACHE_TTL,
                                     "title": "",
                                 }
                         return query
 
                     tmdb_id = results[0]["id"]
-                    english_title = results[0].get("title") or results[0].get("name", "")
+                    english_title = results[0].get("title") or results[0].get(
+                        "name", ""
+                    )
                     with _cache_lock:
                         _tmdb_cache[id_cache_key] = {
                             "expires": time.time() + TMDB_TITLE_CACHE_TTL,
@@ -163,7 +172,10 @@ def translate_query(query, post_type):
                 }
 
             if title and title.lower() != query.lower():
-                print(f"[tmdb] resolved via lang={lang}: {query!r} → {title!r}", flush=True)
+                print(
+                    f"[tmdb] resolved via lang={lang}: {query!r} → {title!r}",
+                    flush=True,
+                )
                 return title
         except Exception as e:
             print(f"[tmdb] error for {query!r} (lang={lang}): {e}", flush=True)
@@ -189,7 +201,7 @@ def extract_tiers(html_text):
     headings = soup.select(".accordion__heading.accordion")
     tiers = []
     seen = set()
-    for heading in headings:
+    for i, heading in enumerate(headings):
         text = heading.get_text(" ", strip=True)
         if not text:
             continue
@@ -198,6 +210,7 @@ def extract_tiers(html_text):
         if key in seen:
             continue
         seen.add(key)
+        tier["_heading_idx"] = i
         panel = heading.find_next_sibling("div", class_="panel")
         size_td = panel.select_one("td.fuente-td") if panel else None
         tier["size"] = size_td.get_text(strip=True) if size_td else ""
@@ -232,17 +245,19 @@ def _prefetch_details(urls):
             resp = requests.get(
                 url,
                 headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                    ),
                     "Accept-Encoding": "gzip, deflate",
                 },
-                timeout=20,
+                timeout=UPSTREAM_TIMEOUT,
             )
             if "text/html" in resp.headers.get("Content-Type", "").lower():
                 tiers = extract_tiers(resp.text)
             else:
                 tiers = []
         except Exception:
-            tiers = []
+            return
         with _cache_lock:
             _detail_cache[url] = {
                 "expires": time.time() + CACHE_TTL,
@@ -255,10 +270,8 @@ def _prefetch_details(urls):
     with ThreadPoolExecutor(max_workers=min(len(urls), 10)) as executor:
         futures = {executor.submit(_fetch_one, u): u for u in urls}
         for future in as_completed(futures):
-            try:
+            with contextlib.suppress(Exception):
                 future.result()
-            except Exception:
-                pass
 
 
 def enrich_listing_page(html_text, english_title=""):
@@ -290,7 +303,9 @@ def enrich_listing_page(html_text, english_title=""):
 
         with _cache_lock:
             cached = _detail_cache.get(detail_url, {})
-        tiers = cached.get("tiers", []) if time.time() < cached.get("expires", 0) else []
+        tiers = (
+            cached.get("tiers", []) if time.time() < cached.get("expires", 0) else []
+        )
         tiers = tiers[:MAX_TIERS]
 
         if not tiers:
@@ -309,13 +324,19 @@ def enrich_listing_page(html_text, english_title=""):
             clone_a = clone.select_one("h3 a.movie-title")
             if clone_a:
                 if english_title and year:
-                    enriched = build_enriched_title(english_title + " (" + year + ")", tier)
+                    enriched = build_enriched_title(
+                        english_title + " (" + year + ")", tier
+                    )
                 else:
                     enriched = build_enriched_title(raw_title, tier)
                 clone_a["title"] = enriched
                 clone_a["data-size"] = tier.get("size", "")
                 parsed = urlparse(detail_url)
-                clone_a["href"] = parsed.path + f"?_tier={j}" + (("&" + parsed.query) if parsed.query else "")
+                clone_a["href"] = (
+                    parsed.path
+                    + f"?_tier={tier.get('_heading_idx', j)}"
+                    + (("&" + parsed.query) if parsed.query else "")
+                )
             clones.append(clone)
 
         parent = thumb.parent
@@ -331,6 +352,8 @@ def enrich_listing_page(html_text, english_title=""):
 def filter_detail_page(html_text, tier_index):
     soup = BeautifulSoup(html_text, "html.parser")
     headings = soup.select(".accordion__heading.accordion")
+    if tier_index < 0 or tier_index >= len(headings):
+        return html_text
     for i, heading in enumerate(headings):
         if i != tier_index:
             panel = heading.find_next_sibling("div", class_="panel")
@@ -343,19 +366,17 @@ def filter_detail_page(html_text, tier_index):
 def _is_listing_page(path, query_string):
     if path.rstrip("/") in ("peliculas", "series", "animes"):
         return True
-    if "s=" in query_string:
-        return True
-    return False
+    return "s=" in query_string
 
 
 def rewrite_html(html_text):
     def replace_acortalink(m):
-        encoded = m.group(2)
+        encoded = m.group("encoded")
         try:
             real_url = decrypt_acortalink(encoded)
         except Exception:
             return m.group(0)
-        return f"{m.group(1)}{real_url}{m.group(3)}"
+        return f'{m.group("prefix")}{m.group("quote")}{real_url}{m.group("quote")}'
 
     html_text = ACORTALINK_RE.sub(replace_acortalink, html_text)
 
@@ -373,7 +394,7 @@ def rewrite_html(html_text):
             "www.hackstore.fo",
             "hackstore.fo",
             "",
-        ) and not parsed.scheme in ("", "http", "https"):
+        ) and parsed.scheme not in ("", "http", "https"):
             pass
 
         if parsed.netloc in ("www.hackstore.fo", "hackstore.fo"):
@@ -418,16 +439,10 @@ def tag_quality_tables(html_text):
         source = tier["source"] or ""
         audio = tier["audio"] or "Latino"
 
-        new_table = table_tag.replace(
-            "<table", f'<table data-quality="{quality}"', 1
-        )
+        new_table = table_tag.replace("<table", f'<table data-quality="{quality}"', 1)
         if source:
-            new_table = new_table.replace(
-                "<table", f'<table data-source="{source}"', 1
-            )
-        new_table = new_table.replace(
-            "<table", f'<table data-audio="{audio}"', 1
-        )
+            new_table = new_table.replace("<table", f'<table data-source="{source}"', 1)
+        new_table = new_table.replace("<table", f'<table data-audio="{audio}"', 1)
         return heading_html + new_table
 
     return QUALITY_TABLE_RE.sub(replacer, html_text)
@@ -440,14 +455,20 @@ def proxy(path):
     parsed_qs = parse_qs(qs, keep_blank_values=True)
     tier_index = None
     if "_tier" in parsed_qs:
-        tier_index = int(parsed_qs.pop("_tier")[0])
+        raw_tier = parsed_qs.pop("_tier")[0]
+        try:
+            tier_index = int(raw_tier)
+            if tier_index < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return Response("Invalid tier", status=400)
 
     english_title = ""
     if "s" in parsed_qs:
         original = parsed_qs["s"][0]
         post_type = parsed_qs.get("post_type", ["movies"])[0]
         clean = original.replace("+", " ")
-        clean = re.sub(r'\s+\(?\d{4}\)?\s*$', '', clean)
+        clean = re.sub(r"\s+\(?\d{4}\)?\s*$", "", clean)
         translated = translate_query(clean, post_type)
         if translated != clean:
             print(f"[tmdb] {original!r} → {translated!r}", flush=True)
@@ -479,6 +500,7 @@ def proxy(path):
         cookies=request.cookies,
         allow_redirects=False,
         stream=True,
+        timeout=UPSTREAM_TIMEOUT,
     )
 
     if upstream_resp.status_code in (301, 302, 303, 307, 308):
@@ -502,9 +524,8 @@ def proxy(path):
             for k, v in upstream_resp.headers.items()
             if k.lower() not in excluded
         ]
-        return Response(
-            status=upstream_resp.status_code, headers={"Location": location}
-        )
+        resp_headers.append(("Location", location))
+        return Response(status=upstream_resp.status_code, headers=resp_headers)
 
     content_type = upstream_resp.headers.get("Content-Type", "").lower()
     excluded = ["content-encoding", "content-length", "transfer-encoding", "connection"]
@@ -524,9 +545,17 @@ def proxy(path):
         if tier_index is not None:
             html_text = filter_detail_page(html_text, tier_index)
         elif _is_listing_page(path, qs):
-            before = len(BeautifulSoup(html_text, "html.parser").select("#movies-block-main .movie-thumbnail"))
+            before = len(
+                BeautifulSoup(html_text, "html.parser").select(
+                    "#movies-block-main .movie-thumbnail"
+                )
+            )
             html_text = enrich_listing_page(html_text, english_title=english_title)
-            after = len(BeautifulSoup(html_text, "html.parser").select("#movies-block-main .movie-thumbnail"))
+            after = len(
+                BeautifulSoup(html_text, "html.parser").select(
+                    "#movies-block-main .movie-thumbnail"
+                )
+            )
             print(f"[proxy] results: {before} → {after} (after enrichment)", flush=True)
         html_text = rewrite_html(html_text)
         return Response(
@@ -544,7 +573,13 @@ if __name__ == "__main__":
     from waitress import serve
 
     if TMDB_API_KEY:
-        print(f"[tmdb] translation enabled (key=...{TMDB_API_KEY[-4:]}, langs={TMDB_LANGUAGES})", flush=True)
+        print(
+            (
+                f"[tmdb] translation enabled (key=...{TMDB_API_KEY[-4:]}, "
+                f"langs={TMDB_LANGUAGES})"
+            ),
+            flush=True,
+        )
     else:
         print("[tmdb] translation DISABLED — set TMDB_API_KEY env var", flush=True)
     print(f"Proxy running at {PROXY_HOST} -> {UPSTREAM}", flush=True)

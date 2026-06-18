@@ -21,5 +21,12 @@ dev = [
     "pytest>=8.0.0",
 ]
 
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+ignore = []
+
+[tool.ruff.format]
+quote-style = "double"
+
 [tool.setuptools]
 py-modules = ["proxy", "decrypt_url"]

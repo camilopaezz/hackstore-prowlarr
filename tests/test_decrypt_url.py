@@ -4,7 +4,6 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from decrypt_url import decrypt_acortalink, evp_bytes_to_key
 
-
 PASSWORD = b"fee631d2cffda38a78b96ee6d2dfb43a"
 
 

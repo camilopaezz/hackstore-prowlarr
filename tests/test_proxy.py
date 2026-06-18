@@ -36,8 +36,20 @@ def test_extract_tiers_deduplicates_matching_entries():
     tiers = extract_tiers(html)
 
     assert tiers == [
-        {"source": "WEB-DL", "quality": "1080p", "audio": "Latino AAC 5.1", "size": "1.2 GB"},
-        {"source": "WEBRip", "quality": "720p", "audio": "Latino AAC 2.0", "size": "800 MB"},
+        {
+            "source": "WEB-DL",
+            "quality": "1080p",
+            "audio": "Latino AAC 5.1",
+            "_heading_idx": 0,
+            "size": "1.2 GB",
+        },
+        {
+            "source": "WEBRip",
+            "quality": "720p",
+            "audio": "Latino AAC 2.0",
+            "_heading_idx": 2,
+            "size": "800 MB",
+        },
     ]
 
 
@@ -63,7 +75,9 @@ def test_is_listing_page_matches_expected_paths():
 
 def test_rewrite_html_rewrites_proxy_links_and_decrypts_acortalink(monkeypatch):
     monkeypatch.setattr("proxy.PROXY_HOST", "http://proxy.local:8080")
-    monkeypatch.setattr("proxy.decrypt_acortalink", lambda encoded: "magnet:?xt=urn:btih:xyz")
+    monkeypatch.setattr(  # noqa: E501
+        "proxy.decrypt_acortalink", lambda encoded: "magnet:?xt=urn:btih:xyz"
+    )
 
     html = (
         '<a href="https://acortalink.net/s.php?i=abc">dl</a>'
