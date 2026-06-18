@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 import pytest
 from bs4 import BeautifulSoup
 
-from proxy import PROXY_HOST, app
+from proxy import app
 
 RUN_LIVE = os.environ.get("RUN_LIVE_HACKSTORE") == "1"
 
@@ -25,7 +25,7 @@ def test_hackstore_proxy_listing_and_detail_e2e():
     )
     assert link is not None
     href = link.get("href", "")
-    assert href.startswith(PROXY_HOST)
+    assert href.startswith("http://localhost")
 
     parsed = urlparse(href)
     detail_path = parsed.path

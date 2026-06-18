@@ -19,7 +19,6 @@ from decrypt_url import decrypt_acortalink
 app = Flask(__name__)
 
 UPSTREAM = "https://www.hackstore.fo"
-PROXY_HOST = os.environ.get("PROXY_HOST", "http://192.168.1.91:8080")
 CACHE_TTL = int(os.environ.get("DETAIL_CACHE_TTL", "3600"))
 MAX_TIERS = int(os.environ.get("MAX_TIERS", "4"))
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
@@ -369,14 +368,14 @@ def _is_listing_page(path, query_string):
     return "s=" in query_string
 
 
-def rewrite_html(html_text):
+def rewrite_html(html_text, base_url):
     def replace_acortalink(m):
         encoded = m.group("encoded")
         try:
             real_url = decrypt_acortalink(encoded)
         except Exception:
             return m.group(0)
-        return f'{m.group("prefix")}{m.group("quote")}{real_url}{m.group("quote")}'
+        return f"{m.group('prefix')}{m.group('quote')}{real_url}{m.group('quote')}"
 
     html_text = ACORTALINK_RE.sub(replace_acortalink, html_text)
 
@@ -398,13 +397,13 @@ def rewrite_html(html_text):
             pass
 
         if parsed.netloc in ("www.hackstore.fo", "hackstore.fo"):
-            new_url = PROXY_HOST + (parsed.path or "/")
+            new_url = base_url + (parsed.path or "/")
             if parsed.query:
                 new_url += "?" + parsed.query
             return f"{attr}{new_url}"
 
         if url.startswith("/"):
-            new_url = PROXY_HOST + url
+            new_url = base_url + url
             return f"{attr}{new_url}"
 
         return m.group(0)
@@ -451,6 +450,7 @@ def tag_quality_tables(html_text):
 @app.route("/", defaults={"path": ""}, methods=["GET", "POST", "HEAD", "OPTIONS"])
 @app.route("/<path:path>", methods=["GET", "POST", "HEAD", "OPTIONS"])
 def proxy(path):
+    base_url = request.host_url.rstrip("/")
     qs = request.query_string.decode("utf-8")
     parsed_qs = parse_qs(qs, keep_blank_values=True)
     tier_index = None
@@ -508,11 +508,11 @@ def proxy(path):
         if location:
             parsed = urlparse(location)
             if parsed.netloc in ("www.hackstore.fo", "hackstore.fo"):
-                location = PROXY_HOST + (parsed.path or "/")
+                location = base_url + (parsed.path or "/")
                 if parsed.query:
                     location += "?" + parsed.query
             elif location.startswith("/"):
-                location = PROXY_HOST + location
+                location = base_url + location
         excluded = [
             "content-encoding",
             "content-length",
@@ -557,7 +557,7 @@ def proxy(path):
                 )
             )
             print(f"[proxy] results: {before} → {after} (after enrichment)", flush=True)
-        html_text = rewrite_html(html_text)
+        html_text = rewrite_html(html_text, base_url)
         return Response(
             html_text, status=upstream_resp.status_code, headers=resp_headers
         )
@@ -582,5 +582,5 @@ if __name__ == "__main__":
         )
     else:
         print("[tmdb] translation DISABLED — set TMDB_API_KEY env var", flush=True)
-    print(f"Proxy running at {PROXY_HOST} -> {UPSTREAM}", flush=True)
+    print(f"Proxy running on port 8080 -> {UPSTREAM}", flush=True)
     serve(app, host="0.0.0.0", port=8080)

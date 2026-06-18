@@ -18,7 +18,6 @@ docker build -t hackstore-proxy .
 # Run
 docker run -d \
   -p 8080:8080 \
-  -e PROXY_HOST=http://<your-host-ip>:8080 \
   -e TMDB_API_KEY=your_tmdb_api_key \
   hackstore-proxy
 ```
@@ -29,7 +28,6 @@ Then configure `hackstore.yml` links to point to `http://<your-host-ip>:8080/` a
 
 | Variable | Default | Description |
 |---|---|---|
-| `PROXY_HOST` | `http://localhost:8080` | Base URL for rewritten links — must be reachable by Prowlarr |
 | `DETAIL_CACHE_TTL` | `3600` | Seconds to cache detail page tier metadata |
 | `MAX_TIERS` | `4` | Max quality tiers to expose per listing result |
 | `TMDB_API_KEY` | `""` | TMDB API v3 key. If empty, query translation is skipped |
@@ -63,8 +61,8 @@ Common Prowlarr config paths:
 
 When Prowlarr runs in Docker but the proxy runs on the host:
 - The proxy binds `0.0.0.0` automatically
-- Use the host IP (or `host.docker.internal`) as `PROXY_HOST`
-- Ensure `hackstore.yml` links match the same reachable URL
+- The proxy uses `request.host_url` to determine the base URL for rewritten links — no configuration needed
+- Ensure `hackstore.yml` links match the URL Prowlarr can reach the proxy at
 
 ## Development
 

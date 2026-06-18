@@ -30,7 +30,6 @@ Each clone's `href` includes `?_tier=N`. When Cardigann visits the detail page, 
 
 | Var | Default | Description |
 |---|---|---|
-| `PROXY_HOST` | `http://192.168.1.91:8080` | Base URL used when rewriting links |
 | `DETAIL_CACHE_TTL` | `3600` | Seconds to cache detail page tier metadata |
 | `MAX_TIERS` | `4` | Max quality tiers to expose per result |
 | `TMDB_API_KEY` | `""` | TMDB API v3 key. If empty, query translation is skipped |
@@ -64,9 +63,9 @@ python scripts/validate.py --single path/to/hackstore.yml definitions/v11/schema
 When Prowlarr runs in Docker but the proxy runs on the host:
 
 - **The proxy binds `0.0.0.0`**, not `127.0.0.1`. `localhost` inside Docker is the container's own loopback, not the host.
-- **`PROXY_HOST` env var** controls the base URL the proxy uses when rewriting `href`/`src`/`action` in HTML. Default: `http://192.168.1.91:8080`. Every rewritten link Prowlarr follows must use a host:port reachable from inside the Docker container.
-- **`hackstore.yml` `links`** must match the same reachable URL. Only keep the one Prowlarr can actually reach — remove `localhost` entries when using Docker.
-- If you change the proxy host/port, update both `proxy.py` (via `PROXY_HOST` env var or the fallback) and `hackstore.yml` `links`.
+- **The proxy uses `request.host_url`** to determine the base URL for rewritten links — it automatically uses whatever host:port Prowlarr used to reach the proxy. No configuration needed.
+- **`hackstore.yml` `links`** must match the URL Prowlarr can actually reach. Only keep the one Prowlarr can actually reach — remove `localhost` entries when using Docker.
+- If you change the proxy host/port, update only `hackstore.yml` `links`.
 
 ### Using the docker-compose test stack
 
@@ -87,8 +86,8 @@ The compose file includes `extra_hosts` mapping `host.docker.internal` to the ho
 # Option B: Use host.docker.internal (portable across networks)
 # Change hackstore.yml links to:
 #   - http://host.docker.internal:8080/
-# Then start proxy with:
-PROXY_HOST=http://host.docker.internal:8080 python proxy.py
+# Then start proxy normally:
+python proxy.py
 ```
 
 **Setup in Prowlarr UI after first launch:**

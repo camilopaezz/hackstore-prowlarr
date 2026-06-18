@@ -9,8 +9,7 @@ COPY proxy.py decrypt_url.py ./
 
 EXPOSE 8080
 
-ENV PROXY_HOST=http://localhost:8080 \
-    DETAIL_CACHE_TTL=3600 \
+ENV DETAIL_CACHE_TTL=3600 \
     MAX_TIERS=4 \
     TMDB_LANGUAGES=es-MX,es \
     TMDB_TITLE_CACHE_TTL=86400

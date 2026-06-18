@@ -18,9 +18,12 @@ def test_parse_heading_extracts_metadata():
 
 
 def test_build_enriched_title_keeps_year_and_tier():
-    assert build_enriched_title(
-        "Movie Name (2026)", {"source": "WEB-DL", "quality": "1080p"}
-    ) == "Movie Name.2026.WEB-DL.1080p.Latino"
+    assert (
+        build_enriched_title(
+            "Movie Name (2026)", {"source": "WEB-DL", "quality": "1080p"}
+        )
+        == "Movie Name.2026.WEB-DL.1080p.Latino"
+    )
 
 
 def test_extract_tiers_deduplicates_matching_entries():
@@ -74,7 +77,6 @@ def test_is_listing_page_matches_expected_paths():
 
 
 def test_rewrite_html_rewrites_proxy_links_and_decrypts_acortalink(monkeypatch):
-    monkeypatch.setattr("proxy.PROXY_HOST", "http://proxy.local:8080")
     monkeypatch.setattr(  # noqa: E501
         "proxy.decrypt_acortalink", lambda encoded: "magnet:?xt=urn:btih:xyz"
     )
@@ -86,7 +88,7 @@ def test_rewrite_html_rewrites_proxy_links_and_decrypts_acortalink(monkeypatch):
         '<a href="#anchor">anchor</a>'
     )
 
-    rewritten = rewrite_html(html)
+    rewritten = rewrite_html(html, base_url="http://proxy.local:8080")
 
     assert 'href="magnet:?xt=urn:btih:xyz"' in rewritten
     assert 'href="http://proxy.local:8080/peliculas/test"' in rewritten
