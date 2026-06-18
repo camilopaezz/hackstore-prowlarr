@@ -1,0 +1,83 @@
+---
+id: hackstore
+name: Hackstore
+description: "Hackstore.fo - Peliculas, Series y Animes (Latino)"
+language: es-ES
+type: public
+encoding: UTF-8
+requestDelay: 2
+followredirect: true
+testlinktorrent: false
+links:
+  - http://192.168.1.91:8080/
+  - http://192.168.1.71:8080/
+
+caps:
+  categories:
+    2000: Movies
+    5000: TV
+    5070: TV/Anime
+
+  modes:
+    search: [q]
+    movie-search: [q]
+    tv-search: [q, season, ep]
+
+settings: []
+
+search:
+  paths:
+    - path: "{{ if .Keywords }}?s={{ .Keywords }}&post_type=movies{{ else }}/peliculas/{{ end }}"
+      categories: [2000]
+    - path: "{{ if .Keywords }}?s={{ .Keywords }}&post_type=tvshows{{ else }}/series/{{ end }}"
+      categories: [5000]
+    - path: "{{ if .Keywords }}?s={{ .Keywords }}&post_type=animes{{ else }}/animes/{{ end }}"
+      categories: [5070]
+
+  keywordsfilters:
+    - name: re_replace
+      args: ["\\s+", "+"]
+
+  rows:
+    selector: "#movies-block-main .movie-thumbnail"
+    filters:
+      - name: andmatch
+
+  fields:
+    title:
+      selector: "h3 a.movie-title"
+      attribute: title
+    category:
+      text: '{{ if eq .Query.Type "tv-search" }}5000{{ else if eq .Query.Type "movie-search" }}2000{{ else }}2000{{ end }}'
+    details:
+      selector: "h3 a.movie-title"
+      attribute: href
+    download:
+      text: "{{ .Result.details }}"
+    year:
+      selector: "h3 a.movie-title"
+      attribute: title
+      filters:
+        - name: re_replace
+          args: [".*\\.(\\d{4})\\.(?:WEB-DL|BDRip|BluRay|DVDRip|\\d{3,4}p|4K|Latino).*", "$1"]
+      optional: true
+    seeders:
+      text: 1
+    leechers:
+      text: 1
+    size:
+      selector: "h3 a.movie-title"
+      attribute: data-size
+      optional: true
+    description:
+      text: "Audio Latino"
+      optional: true
+    downloadvolumefactor:
+      text: 0
+    uploadvolumefactor:
+      text: 1
+
+download:
+  selectors:
+    - selector: "table.newtab a.btn-slide"
+      attribute: href
