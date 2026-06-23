@@ -4,9 +4,7 @@ __pycache__/
 .gitignore
 .python-version
 data/
-docker-compose.yml
 *.md
-plan.md
 uv.lock
 Dockerfile
 .dockerignore

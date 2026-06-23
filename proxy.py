@@ -29,6 +29,22 @@ UPSTREAM_TIMEOUT = 20
 _detail_cache = {}
 _cache_lock = threading.Lock()
 _tmdb_cache = {}
+_last_sweep = 0.0
+_SWEEP_INTERVAL = 300
+
+
+def _maybe_sweep_caches():
+    global _last_sweep
+    now = time.time()
+    if now - _last_sweep < _SWEEP_INTERVAL:
+        return
+    _last_sweep = now
+    with _cache_lock:
+        for cache in (_detail_cache, _tmdb_cache):
+            expired = [k for k, v in cache.items() if now >= v.get("expires", 0)]
+            for k in expired:
+                del cache[k]
+
 
 ACORTALINK_RE = re.compile(
     r'(?P<prefix><a\b[^>]*\shref=)(?P<quote>["\'])https://acortalink\.net/s\.php\?i=(?P<encoded>[^"\']*)(?P=quote)',
@@ -98,10 +114,48 @@ def translate_query(query, post_type):
         detail_endpoint = "/movie"
         result_key = "title"
 
+    # Step 1: Resolve TMDB ID (once, shared across all languages)
     id_cache_key = f"__id__{query}|{post_type}"
     tmdb_id = None
-    id_expired = True
 
+    with _cache_lock:
+        id_entry = _tmdb_cache.get(id_cache_key)
+        if id_entry and time.time() < id_entry.get("expires", 0):
+            tmdb_id = id_entry["tmdb_id"]
+
+    if tmdb_id is None:
+        try:
+            resp = requests.get(
+                f"https://api.themoviedb.org/3{search_endpoint}",
+                params={"api_key": TMDB_API_KEY, "query": query},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            results = resp.json().get("results", [])
+
+            if not results:
+                print(f"[tmdb] no TMDB match for {query!r} ({post_type})", flush=True)
+                for lang in languages:
+                    with _cache_lock:
+                        _tmdb_cache[f"{query}|{post_type}|{lang}"] = {
+                            "expires": time.time() + TMDB_TITLE_CACHE_TTL,
+                            "title": "",
+                        }
+                return query
+
+            tmdb_id = results[0]["id"]
+            english_title = results[0].get("title") or results[0].get("name", "")
+            with _cache_lock:
+                _tmdb_cache[id_cache_key] = {
+                    "expires": time.time() + TMDB_TITLE_CACHE_TTL,
+                    "tmdb_id": tmdb_id,
+                    "english_title": english_title,
+                }
+        except Exception as e:
+            print(f"[tmdb] ID lookup error for {query!r}: {e}", flush=True)
+            return query
+
+    # Step 2: Fetch localized title for each language
     for lang in languages:
         title_cache_key = f"{query}|{post_type}|{lang}"
         with _cache_lock:
@@ -113,49 +167,6 @@ def translate_query(query, post_type):
                 continue
 
         try:
-            # Step 1: resolve TMDB ID (once, shared across language chain)
-            if tmdb_id is None:
-                with _cache_lock:
-                    id_entry = _tmdb_cache.get(id_cache_key)
-                    if id_entry and time.time() < id_entry.get("expires", 0):
-                        tmdb_id = id_entry["tmdb_id"]
-                        id_expired = False
-
-                if tmdb_id is None or id_expired:
-                    resp = requests.get(
-                        f"https://api.themoviedb.org/3{search_endpoint}",
-                        params={"api_key": TMDB_API_KEY, "query": query},
-                        timeout=10,
-                    )
-                    resp.raise_for_status()
-                    results = resp.json().get("results", [])
-
-                    if not results:
-                        # Nothing found — bubble-empty cache for all languages
-                        print(
-                            f"[tmdb] no TMDB match for {query!r} ({post_type})",
-                            flush=True,
-                        )
-                        for lang in languages:
-                            with _cache_lock:
-                                _tmdb_cache[f"{query}|{post_type}|{lang}"] = {
-                                    "expires": time.time() + TMDB_TITLE_CACHE_TTL,
-                                    "title": "",
-                                }
-                        return query
-
-                    tmdb_id = results[0]["id"]
-                    english_title = results[0].get("title") or results[0].get(
-                        "name", ""
-                    )
-                    with _cache_lock:
-                        _tmdb_cache[id_cache_key] = {
-                            "expires": time.time() + TMDB_TITLE_CACHE_TTL,
-                            "tmdb_id": tmdb_id,
-                            "english_title": english_title,
-                        }
-
-            # Step 2: fetch localized title
             resp = requests.get(
                 f"https://api.themoviedb.org/3{detail_endpoint}/{tmdb_id}",
                 params={"api_key": TMDB_API_KEY, "language": lang},
@@ -236,6 +247,8 @@ def build_enriched_title(raw_title, tier):
 
 def _prefetch_details(urls):
     def _fetch_one(url):
+        if not url.startswith(("http://", "https://")):
+            url = UPSTREAM.rstrip("/") + "/" + url.lstrip("/")
         with _cache_lock:
             cached = _detail_cache.get(url)
             if cached and time.time() < cached["expires"]:
@@ -279,6 +292,8 @@ def enrich_listing_page(html_text, english_title=""):
     if not thumbs:
         return html_text
 
+    before = len(thumbs)
+
     detail_urls = []
     for thumb in thumbs:
         a_tag = thumb.select_one("h3 a.movie-title")
@@ -318,7 +333,7 @@ def enrich_listing_page(html_text, english_title=""):
         clones = []
         m = MOVIE_TITLE_YEAR_RE.match(raw_title.strip())
         year = m.group(2) if m else ""
-        for j, tier in enumerate(tiers):
+        for tier in tiers:
             clone = copy.copy(thumb)
             clone_a = clone.select_one("h3 a.movie-title")
             if clone_a:
@@ -333,7 +348,7 @@ def enrich_listing_page(html_text, english_title=""):
                 parsed = urlparse(detail_url)
                 clone_a["href"] = (
                     parsed.path
-                    + f"?_tier={tier.get('_heading_idx', j)}"
+                    + f"?_tier={tier.get('_heading_idx', 0)}"
                     + (("&" + parsed.query) if parsed.query else "")
                 )
             clones.append(clone)
@@ -345,6 +360,8 @@ def enrich_listing_page(html_text, english_title=""):
             for j, clone in enumerate(clones):
                 parent.insert(idx + j, clone)
 
+    after = len(soup.select("#movies-block-main .movie-thumbnail"))
+    print(f"[proxy] results: {before} → {after} (after enrichment)", flush=True)
     return str(soup)
 
 
@@ -389,12 +406,6 @@ def rewrite_html(html_text, base_url):
             return m.group(0)
 
         parsed = urlparse(url)
-        if parsed.netloc in (
-            "www.hackstore.fo",
-            "hackstore.fo",
-            "",
-        ) and parsed.scheme not in ("", "http", "https"):
-            pass
 
         if parsed.netloc in ("www.hackstore.fo", "hackstore.fo"):
             new_url = base_url + (parsed.path or "/")
@@ -411,45 +422,13 @@ def rewrite_html(html_text, base_url):
     ATTR_RE = re.compile(r"""(\b(?:src|href|action)=["'])([^"']*)""", re.IGNORECASE)
     html_text = ATTR_RE.sub(rewrite_url, html_text)
 
-    html_text = tag_quality_tables(html_text)
-
     return html_text
-
-
-QUALITY_TABLE_RE = re.compile(
-    r'(<div\s+class="[^"]*\baccordion__heading\b[^"]*"[^>]*>(.*?)</div>\s*'
-    r'<div\s+class="[^"]*\bpanel\b[^"]*"[^>]*>.*?)'
-    r'(<table\s+[^>]*class="[^"]*\bnewtab\b[^"]*"[^>]*>)',
-    re.DOTALL | re.IGNORECASE,
-)
-
-
-def tag_quality_tables(html_text):
-    def replacer(m):
-        heading_html = m.group(1)
-        heading_text = m.group(2)
-        table_tag = m.group(3)
-
-        heading_visible = re.sub(r"<[^>]*>", " ", heading_text)
-        heading_visible = re.sub(r"\s+", " ", heading_visible).strip()
-        tier = parse_heading(heading_visible)
-
-        quality = tier["quality"] or "other"
-        source = tier["source"] or ""
-        audio = tier["audio"] or "Latino"
-
-        new_table = table_tag.replace("<table", f'<table data-quality="{quality}"', 1)
-        if source:
-            new_table = new_table.replace("<table", f'<table data-source="{source}"', 1)
-        new_table = new_table.replace("<table", f'<table data-audio="{audio}"', 1)
-        return heading_html + new_table
-
-    return QUALITY_TABLE_RE.sub(replacer, html_text)
 
 
 @app.route("/", defaults={"path": ""}, methods=["GET", "POST", "HEAD", "OPTIONS"])
 @app.route("/<path:path>", methods=["GET", "POST", "HEAD", "OPTIONS"])
 def proxy(path):
+    _maybe_sweep_caches()
     base_url = request.host_url.rstrip("/")
     qs = request.query_string.decode("utf-8")
     parsed_qs = parse_qs(qs, keep_blank_values=True)
@@ -499,7 +478,6 @@ def proxy(path):
         data=request.get_data() if request.method in ("POST",) else None,
         cookies=request.cookies,
         allow_redirects=False,
-        stream=True,
         timeout=UPSTREAM_TIMEOUT,
     )
 
@@ -545,18 +523,7 @@ def proxy(path):
         if tier_index is not None:
             html_text = filter_detail_page(html_text, tier_index)
         elif _is_listing_page(path, qs):
-            before = len(
-                BeautifulSoup(html_text, "html.parser").select(
-                    "#movies-block-main .movie-thumbnail"
-                )
-            )
             html_text = enrich_listing_page(html_text, english_title=english_title)
-            after = len(
-                BeautifulSoup(html_text, "html.parser").select(
-                    "#movies-block-main .movie-thumbnail"
-                )
-            )
-            print(f"[proxy] results: {before} → {after} (after enrichment)", flush=True)
         html_text = rewrite_html(html_text, base_url)
         return Response(
             html_text, status=upstream_resp.status_code, headers=resp_headers

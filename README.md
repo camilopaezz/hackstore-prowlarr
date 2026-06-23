@@ -1,4 +1,4 @@
-# hackstore-radarr
+# hackstore-prowlarr
 
 Prowlarr indexer proxy for [hackstore.fo](https://hackstore.fo) — provides Latin-American Spanish movies, series, and anime to Radarr/Sonarr.
 
@@ -22,24 +22,7 @@ docker run -d \
   hackstore-proxy
 ```
 
-### Or with docker-compose
-
-```yaml
-# docker-compose.yml
-services:
-  hackstore-proxy:
-    build: .
-    ports:
-      - "7070:7070"
-    environment:
-      - TMDB_API_KEY=your_tmdb_api_key
-```
-
-```bash
-docker compose up -d
-```
-
-**Important:** whichever method you use, you must edit `hackstore.yml` `links` to point to the proxy URL Prowlarr can reach — e.g. `http://<your-host-ip>:7070/`. Then install the YML into Prowlarr's `Definitions/Custom/`.
+**Important:** you must edit `hackstore.yml` `links` to point to the proxy URL Prowlarr can reach — e.g. `http://<your-host-ip>:7070/`. Then install the YML into Prowlarr's `Definitions/Custom/`.
 
 ## Environment variables
 

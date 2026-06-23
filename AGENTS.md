@@ -67,39 +67,12 @@ When Prowlarr runs in Docker but the proxy runs on the host:
 - **`hackstore.yml` `links`** must match the URL Prowlarr can actually reach. Only keep the one Prowlarr can actually reach — remove `localhost` entries when using Docker.
 - If you change the proxy host/port, update only `hackstore.yml` `links`.
 
-### Using the docker-compose test stack
-
-```bash
-# Start Prowlarr + Radarr
-docker compose up -d
-
-# Prowlarr UI:  http://localhost:9696
-# Radarr UI:    http://localhost:7878
-```
-
-The compose file includes `extra_hosts` mapping `host.docker.internal` to the host gateway. To use it instead of a hardcoded LAN IP:
-
-```bash
-# Option A: Keep LAN IP (default — containers can reach LAN IPs directly)
-# No changes needed. hackstore.yml links uses 192.168.1.91:7070
-
-# Option B: Use host.docker.internal (portable across networks)
-# Change hackstore.yml links to:
-#   - http://host.docker.internal:7070/
-# Then start proxy normally:
-python proxy.py
-```
-
-**Setup in Prowlarr UI after first launch:**
-1. Settings → Indexers → Add → search "Hackstore" → add it
-2. Settings → Apps → Add Radarr → fill in Radarr URL `http://radarr:7878` and API key
-3. Use "Sync App Indexers" to push Hackstore to Radarr
-
 ## Schema gotchas
 
-The v11 schema requires these in `search.fields` (even for indexers that extract downloads from detail pages):
-- `category` or `categorydesc` — use `text: 2000` as a default
+The v11 schema requires one of these in `search.fields` (even for indexers that extract downloads from detail pages):
 - `download`, `magnet`, or `infohash` — use `text: "{{ .Result.details }}"` when the real download is extracted by the `download` block
+
+Categories are handled by per-path `categories` arrays in `search.paths` — no `category` field in `search.fields` is needed when each path has its own category.
 
 The proxy passes `debug=False` to Flask — using `debug=True` causes the reloader to hang.
 

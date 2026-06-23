@@ -5,7 +5,6 @@ from proxy import (
     filter_detail_page,
     parse_heading,
     rewrite_html,
-    tag_quality_tables,
 )
 
 
@@ -94,16 +93,3 @@ def test_rewrite_html_rewrites_proxy_links_and_decrypts_acortalink(monkeypatch):
     assert 'href="http://proxy.local:8080/peliculas/test"' in rewritten
     assert 'src="http://proxy.local:8080/media/x.png"' in rewritten
     assert 'href="#anchor"' in rewritten
-
-
-def test_tag_quality_tables_adds_metadata_attributes():
-    html = (
-        '<div class="accordion__heading accordion">WEB-DL 1080p Latino AAC 5.1</div>'
-        '<div class="panel"><table class="newtab"><tr><td>x</td></tr></table></div>'
-    )
-
-    tagged = tag_quality_tables(html)
-
-    assert 'data-quality="1080p"' in tagged
-    assert 'data-source="WEB-DL"' in tagged
-    assert 'data-audio="Latino AAC 5.1"' in tagged
