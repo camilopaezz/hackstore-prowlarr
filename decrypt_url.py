@@ -6,6 +6,7 @@
 import base64
 import hashlib
 
+from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 
@@ -17,19 +18,6 @@ def evp_bytes_to_key(password, salt, key_len=32, iv_len=16):
         d = hashlib.md5(d + password + salt).digest()
         dtot += d
     return dtot[:key_len], dtot[key_len : key_len + iv_len]
-
-
-def _strip_pkcs7_padding(data, block_size=16):
-    if not data or len(data) % block_size != 0:
-        raise ValueError("Invalid padded plaintext length")
-
-    pad_len = data[-1]
-    if pad_len < 1 or pad_len > block_size:
-        raise ValueError("Invalid PKCS#7 padding length")
-    if data[-pad_len:] != bytes([pad_len]) * pad_len:
-        raise ValueError("Invalid PKCS#7 padding bytes")
-
-    return data[:-pad_len]
 
 
 def decrypt_acortalink(encoded):
@@ -58,7 +46,8 @@ def decrypt_acortalink(encoded):
     decryptor = cipher.decryptor()
     decrypted = decryptor.update(encrypted) + decryptor.finalize()
 
-    decrypted = _strip_pkcs7_padding(decrypted)
+    unpadder = padding.PKCS7(128).unpadder()
+    decrypted = unpadder.update(decrypted) + unpadder.finalize()
 
     return decrypted.decode("utf-8")
 

@@ -51,6 +51,10 @@ ACORTALINK_RE = re.compile(
     re.IGNORECASE,
 )
 
+ATTRIBUTE_URL_RE = re.compile(
+    r"""(\b(?:src|href|action)=["'])([^"']*)""", re.IGNORECASE
+)
+
 HEADING_SOURCE_RE = re.compile(
     r"\b(WEB-DL|BDRip|BluRay|BRRip|DVDRip|HDRip|WEBRip)\b", re.I
 )
@@ -419,8 +423,7 @@ def rewrite_html(html_text, base_url):
 
         return m.group(0)
 
-    ATTR_RE = re.compile(r"""(\b(?:src|href|action)=["'])([^"']*)""", re.IGNORECASE)
-    html_text = ATTR_RE.sub(rewrite_url, html_text)
+    html_text = ATTRIBUTE_URL_RE.sub(rewrite_url, html_text)
 
     return html_text
 

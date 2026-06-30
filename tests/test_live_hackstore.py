@@ -1,15 +1,10 @@
-import os
 from urllib.parse import urlparse
 
-import pytest
 from bs4 import BeautifulSoup
 
 from proxy import app
 
-RUN_LIVE = os.environ.get("RUN_LIVE_HACKSTORE") == "1"
 
-
-@pytest.mark.skipif(not RUN_LIVE, reason="set RUN_LIVE_HACKSTORE=1 to run live checks")
 def test_hackstore_proxy_listing_and_detail_e2e():
     client = app.test_client()
 
